@@ -60,13 +60,12 @@ use solana_program::{
 };
 use crate::pump::{buy::BuyInstructionData, 
     sell::SellInstructionData,  
-    set_params::SetParamsInstructionData, 
     create::CreateInstructionData
 };
 use std::mem::size_of;
 use std::collections::HashMap;
 use lazy_static::lazy_static;
-use crate::bot::constants::{INSTRUCTION_BUY, INSTRUCTION_CREATE, INSTRUCTION_INITIALIZE, INSTRUCTION_SELL, INSTRUCTION_SET_PARAMS, INSTRUCTION_WITHDRAW};
+use crate::bot::constants::{INSTRUCTION_BUY, INSTRUCTION_CREATE, INSTRUCTION_SELL};
 
 
 #[derive(BorshSerialize, BorshDeserialize, Debug)]
@@ -92,10 +91,7 @@ pub enum PumpInstruction {
         data: CreateInstructionData,
         accounts: Vec<AccountMeta>,
     },
-    Initialize(Initialize),
     SellInstructionData(SellInstructionData),
-    SetParamsInstructionData(SetParamsInstructionData),
-    Withdraw(Withdraw),
 }
 
 // Add this struct for instruction identification
@@ -108,18 +104,6 @@ pub struct InstructionID {
 lazy_static! {
     pub static ref PUMP_IDS: HashMap<[u8; 8], InstructionID> = {
         let mut m = HashMap::new();
-        m.insert(
-            INSTRUCTION_INITIALIZE,
-            InstructionID {
-                name: "initialize".to_string(),
-            }
-        );
-        m.insert(
-            INSTRUCTION_SET_PARAMS,
-            InstructionID {
-                name: "set_params".to_string(),
-            }
-        );
         m.insert(
             INSTRUCTION_CREATE,
             InstructionID {
@@ -136,12 +120,6 @@ lazy_static! {
             INSTRUCTION_SELL,
             InstructionID {
                 name: "sell".to_string(),
-            }
-        );
-        m.insert(
-            INSTRUCTION_WITHDRAW,
-            InstructionID {
-                name: "withdraw".to_string(),
             }
         );
         m
@@ -170,22 +148,11 @@ impl PumpInstruction {
                     accounts: Vec::new(),
                 })
             }
-            INSTRUCTION_INITIALIZE => {
-                let payload = Initialize::try_from_slice(rest)?;
-                Ok(PumpInstruction::Initialize(payload))
-            }
             INSTRUCTION_SELL => {
                 let payload = SellInstructionData::try_from_slice(rest)?;
                 Ok(PumpInstruction::SellInstructionData(payload))
             }
-            INSTRUCTION_SET_PARAMS => {
-                let payload = SetParamsInstructionData::try_from_slice(rest)?;
-                Ok(PumpInstruction::SetParamsInstructionData(payload))
-            }
-            INSTRUCTION_WITHDRAW => {
-                let payload = Withdraw::try_from_slice(rest)?;
-                Ok(PumpInstruction::Withdraw(payload))
-            }
+
             _ => Err(ProgramError::InvalidInstructionData),
         }
     }
@@ -201,22 +168,12 @@ impl PumpInstruction {
                 buf.extend_from_slice(&INSTRUCTION_CREATE);
                 buf.extend_from_slice(&data.try_to_vec().unwrap());
             }
-            PumpInstruction::Initialize(payload) => {
-                buf.extend_from_slice(&INSTRUCTION_INITIALIZE);
-                buf.extend_from_slice(&payload.try_to_vec().unwrap());
-            }
+
             PumpInstruction::SellInstructionData(payload) => {
                 buf.extend_from_slice(&INSTRUCTION_SELL);
                 buf.extend_from_slice(&payload.try_to_vec().unwrap());
             }
-            PumpInstruction::SetParamsInstructionData(payload) => {
-                buf.extend_from_slice(&INSTRUCTION_SET_PARAMS);
-                buf.extend_from_slice(&payload.try_to_vec().unwrap());
-            }
-            PumpInstruction::Withdraw(payload) => {
-                buf.extend_from_slice(&INSTRUCTION_WITHDRAW);
-                buf.extend_from_slice(&payload.try_to_vec().unwrap());
-            }
+
         }
         buf
     }
@@ -243,17 +200,8 @@ pub fn decode_instruction(accounts: &[AccountMeta], data: &[u8]) -> Result<PumpI
             }
             *inst_accounts = accounts.to_vec();
         }
-        PumpInstruction::Initialize(_) => {
-            // Initialize doesn't store accounts
-        }
         PumpInstruction::SellInstructionData(_) => {
             // Sell doesn't store accounts
-        }
-        PumpInstruction::SetParamsInstructionData(_) => {
-            // SetParams doesn't store accounts
-        }
-        PumpInstruction::Withdraw(_) => {
-            // Withdraw doesn't store accounts
         }
     }
     

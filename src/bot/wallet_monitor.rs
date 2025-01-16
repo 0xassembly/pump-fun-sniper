@@ -1,18 +1,11 @@
 use {
-    super::constants::EVENT_AUTH_ID, crate::{bot::{constants::{INSTRUCTION_BUY, INSTRUCTION_SELL, MINT_AUTH_ID, PROGRAM_ID as PUMP_PROGRAM_ID, PUMP_METAPLEX_ID}, grpc_monitor_mints::MonitorError, structs::Coin, Bot}, pump::{buy::{BuyAccounts, BuyInstructionData}, sell::{SellAccounts, SellInstructionData}}}, borsh::BorshDeserialize, futures::{SinkExt, Stream, StreamExt}, log::{error, info}, solana_program::pubkey::Pubkey, solana_sdk::bs58, std::{collections::HashMap, error::Error, str::FromStr, sync::Arc}, tokio::{sync::Mutex, time::Duration}, tonic::Status, yellowstone_grpc_proto::prelude::{
+    super::constants::EVENT_AUTH_ID, crate::{bot::{constants::{INSTRUCTION_BUY, INSTRUCTION_SELL, WALLET_ADDRESS, WALLET_EVENT_DISCRIMINATOR, WALLET_BUY_DISCRIMINATOR, WALLET_SELL_DISCRIMINATOR, LAMPORTS_PER_SOL}, structs::Coin, Bot}, pump::{buy::{BuyAccounts, BuyInstructionData}, sell::{SellAccounts, SellInstructionData}}}, borsh::BorshDeserialize, futures::{SinkExt, Stream, StreamExt}, log::{error, info}, solana_program::pubkey::Pubkey, solana_sdk::bs58, std::{collections::HashMap, error::Error, str::FromStr, sync::Arc}, tokio::{sync::Mutex, time::Duration}, tonic::Status, yellowstone_grpc_proto::prelude::{
         subscribe_update:: UpdateOneof, CommitmentLevel, SubscribeRequest, SubscribeRequestFilterAccounts, SubscribeRequestFilterTransactions, SubscribeUpdate, SubscribeUpdateTransactionInfo
     }
 
 };
 
-lazy_static::lazy_static! {
-    static ref WALLET_ADDRESS: String = String::from("DfMxre4cKmvogbLrPigxmibVTTQDuzjdXojWzjCXXhzj");
-    static ref WALLET_BUY_DISCRIMINATOR: [u8; 8] = [82, 225, 119, 231, 78, 29, 45, 70];
-    static ref WALLET_SELL_DISCRIMINATOR: [u8; 8] = [93, 88, 60, 34, 91, 18, 86, 197];
-    static ref EVENT_DISCRIMINATOR: [u8; 8] = [228, 69, 165, 46, 81, 203, 154, 29];
-}
-
-const LAMPORTS_PER_SOL: u64 = 1_000_000_000;
+use crate::error::MonitorError;
 impl Bot {
 
     pub async fn grpc_monitor_wallet(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -38,7 +31,7 @@ impl Bot {
         };
 
 
-        if let Err(err) = subscribe_tx.send(self.create_wallet_monitor_request(&WALLET_ADDRESS)).await {
+        if let Err(err) = subscribe_tx.send(self.create_wallet_monitor_request(&WALLET_ADDRESS.to_string())).await {
             error!("Error sending subscription request: {}", err);
             continue;
         }
@@ -141,7 +134,7 @@ impl Bot {
                                 let coin = Arc::new(Mutex::new(new_coin));
                                 if let Err(e) = self.coins_to_buy_sender.send(coin).await {
                                     error!("Failed to send coin to buy channel: {}", e);
-                                    return Err(Box::new(MonitorError::NoCreatorBuy));
+                                    return Err(Box::new(e));
                                 }
                                 
                                 return Ok(());
@@ -190,7 +183,7 @@ impl Bot {
                         };
                         
                         let accounts = BuyAccounts::decode_account_keys(&message_clone.account_keys)
-                            .map_err(|e| Box::new(MonitorError::NoCreatorBuy))?;
+                            .map_err(|e| Box::new(MonitorError::BuyAccountsCantDecode))?;
                         info!("Accounts: {:?}", accounts);
 
                         info!("Successfully got buy accounts: {:?}", accounts);
@@ -198,7 +191,7 @@ impl Bot {
                         let buy_data = BuyInstructionData::try_from_slice(&solana_instruction.data[8..])
                             .map_err(|e| {
                                 error!("Failed to decode buy data: {}", e);
-                                MonitorError::NoCreatorBuy
+                                MonitorError::BuyDataCantDecode
                             })?;
                         info!("Successfully decoded buy data: {:?}", buy_data);
 
@@ -215,7 +208,7 @@ impl Bot {
                         };
 
                                         // Get creator buy information
-                        match self.wallet_fetch_creator_buy(&mut new_coin, &transaction, &buy_data).await {
+                        match self.decode_bonding_curve_event(&mut new_coin, &transaction, &buy_data).await {
                             Ok(_) => {
                                 info!("Successfully fetched mint details for signature {:?}", &transaction.signature);
                                 return Ok(new_coin)
@@ -307,20 +300,19 @@ impl Bot {
 
 
     /// Extracts creator buy information from a transaction
-    async fn wallet_fetch_creator_buy(&self,coin: &mut Coin, transaction: &SubscribeUpdateTransactionInfo, buy_data: &BuyInstructionData) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn decode_bonding_curve_event(&self,coin: &mut Coin, transaction: &SubscribeUpdateTransactionInfo, buy_data: &BuyInstructionData) -> Result<(), Box<dyn Error + Send + Sync>> {
         let message_clone = &transaction.transaction.as_ref().unwrap().message.as_ref().unwrap().clone();
 
         if let Some(meta) = &transaction.meta {
             let inner_instructions = meta.inner_instructions.clone();
             //info!("Inner instructions: {:?}", inner_instructions);
-            const EVENT_DISCRIMINATOR: [u8; 8] = [228, 69, 165, 46, 81, 203, 154, 29];
 
             for inner_ix_set in inner_instructions {
                 for inner_ix in inner_ix_set.instructions {
                     // Check instruction data
                     if inner_ix.data.len() >= 130  // Ensure data is long enough (8 + 2 bytes minimum)
-                        && inner_ix.data[0..8] == EVENT_DISCRIMINATOR  // Check start
-                        && inner_ix.data[inner_ix.data.len()-2..] == [2, 0]  // Check end
+                        && inner_ix.data[0..8] == WALLET_EVENT_DISCRIMINATOR  // Check start
+
                     {
                     
                         let offset = 8; // Skip the first 8 bytes (discriminator)
@@ -342,7 +334,7 @@ impl Bot {
 
             if buy_data.max_sol_cost == 0 {
                 error!("Invalid buy amount (0 SOL)");
-                return Err(Box::new(MonitorError::NoCreatorBuy));
+                return Err(Box::new(MonitorError::ZeroBuyAmount));
             }
 
             info!("Successfully decoded buy data: {} SOL", buy_data.max_sol_cost as f64 / LAMPORTS_PER_SOL as f64);
@@ -358,17 +350,6 @@ impl Bot {
     }
 
 
-    async fn handle_event_instruction(
-        &self,
-        meta_info: &yellowstone_grpc_proto::prelude::TransactionStatusMeta,
-        message_clone: &yellowstone_grpc_proto::prelude::Message,
-        instruction: &yellowstone_grpc_proto::prelude::CompiledInstruction,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        // Add your event handling logic here
-        info!("Processing event instruction");
-        // TODO: Implement event handling logic
-        Ok(())
-    }
 }
 
 #[cfg(test)]

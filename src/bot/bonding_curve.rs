@@ -88,25 +88,25 @@ impl BondingCurveData {
 
 
     pub fn calculate_sell_quote(&self, token_amount: u64, percentage: f64) -> u128 {
-    let token_amount = token_amount as u128;
-    let virtual_sol_reserves = self.virtual_sol_reserves;
-    let virtual_token_reserves = self.virtual_token_reserves;
+        let token_amount = token_amount as u128;
+        let virtual_sol_reserves = self.virtual_sol_reserves;
+        let virtual_token_reserves = self.virtual_token_reserves;
 
-    // Calculate new virtual token reserves
-    let new_virtual_token_reserves = virtual_token_reserves.saturating_sub(token_amount);
-    
-    // Calculate invariant and new virtual sol reserves
-    let invariant = virtual_sol_reserves.saturating_mul(virtual_token_reserves);
-    let new_virtual_sol_reserves = invariant.saturating_div(new_virtual_token_reserves);
+        // Calculate new virtual token reserves
+        let new_virtual_token_reserves = virtual_token_reserves.saturating_sub(token_amount);
+        
+        // Calculate invariant and new virtual sol reserves
+        let invariant = virtual_sol_reserves.saturating_mul(virtual_token_reserves);
+        let new_virtual_sol_reserves = invariant.saturating_div(new_virtual_token_reserves);
 
-    // Calculate the SOL amount we'll receive
-    let sol_amount = new_virtual_sol_reserves.saturating_sub(virtual_sol_reserves);
+        // Calculate the SOL amount we'll receive
+        let sol_amount = new_virtual_sol_reserves.saturating_sub(virtual_sol_reserves);
 
-    // Apply the percentage reduction (e.g., 98% or 0.98)
-    let final_sol = (sol_amount as f64 * percentage) as u128;
+        // Apply the percentage reduction (e.g., 98% or 0.98)
+        let final_sol = (sol_amount as f64 * percentage) as u128;
 
-    final_sol
-}
+        final_sol
+    }
 }
 
 #[cfg(test)]

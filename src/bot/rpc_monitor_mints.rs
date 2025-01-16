@@ -1,5 +1,3 @@
-
-
 use {
     crate::{
         bot::{structs::Coin, utils::is_exchange_address, Bot, constants::{{INSTRUCTION_BUY, INSTRUCTION_CREATE}, PROGRAM_ID as PUMP_PROGRAM_ID, PUMP_METAPLEX_ID, MINT_AUTH_ID}},
@@ -30,23 +28,9 @@ use {
     }}
 };
 
+use crate::error::MonitorError;
 
 const LAMPORTS_PER_SOL: u64 = 1_000_000_000;
-
-#[derive(Debug, thiserror::Error)]
-pub enum MonitorError {
-    #[error("Bad create instruction")]
-    BadCreateInstruction,
-    
-    #[error("No creator ATA")]
-    NoCreatorATA,
-    
-    #[error("Error creating new coin")]
-    CreatingNewCoin,
-    
-    #[error("No creator buy found")]
-    NoCreatorBuy,
-}
 
 impl Bot {
     /// Monitors for new mints by subscribing to logs for the pump program

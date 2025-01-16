@@ -1,27 +1,35 @@
-use thiserror::Error;
-use solana_client::client_error::ClientError;
-use sqlx::Error as SqlxError;
+#[derive(Debug, thiserror::Error)]
+pub enum MonitorError {
+    #[error("Bad create instruction")]
+    BadCreateInstruction,
+    
+    #[error("No creator ATA")]
+    NoCreatorATA,
+    
+    #[error("Error creating new coin")]
+    CreatingNewCoin,
+    
+    #[error("No creator buy found")]
+    NoCreatorBuy,
 
-#[derive(Error, Debug)]
-pub enum BotError {
-    #[error("Solana client error: {0}")]
-    ClientError(#[from] ClientError),
+    #[error("No creator sell found")]
+    NoCreatorSell,
 
-    #[error("Database error: {0}")]
-    DatabaseError(#[from] SqlxError),
+    #[error("Buy amount can't be ZERO")]
+    ZeroBuyAmount,
+    
+    #[error("Buy data can't be decoded")]
+    BuyDataCantDecode,
 
-    #[error("Invalid configuration: {0}")]
-    ConfigError(String),
+    #[error("Buy accounts can't be decoded")]
+    BuyAccountsCantDecode,
 
-    #[error("Transaction error: {0}")]
-    TransactionError(String),
+    #[error("Instruction data too short")]
+    InstructionDataTooShort,
 
-    #[error("Account error: {0}")]
-    AccountError(String),
+    #[error("No create instruction found")]
+    NoCreateInstruction,
 
-    #[error("Network error: {0}")]
-    NetworkError(String),
-
-    #[error("Metrics error: {0}")]
-    MetricsError(String),
-} 
+    #[error("No buy instruction found")]
+    NoBuyInstruction,
+}

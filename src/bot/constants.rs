@@ -3,6 +3,7 @@ use solana_program::pubkey::Pubkey;
 
 
 pub const COMPUTE_UNIT_LIMIT: u32 = 70_000; 
+pub const LAMPORTS_PER_SOL: u64 = 1_000_000_000;
 // Program ID
 pub const  PROGRAM_ID: Pubkey = solana_program::pubkey!("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P");
 pub const  GLOBAL_ID: Pubkey = solana_program::pubkey!("4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf");
@@ -19,3 +20,10 @@ pub const INSTRUCTION_CREATE: [u8; 8] = [24, 30, 200, 40, 5, 28, 7, 119];
 pub const INSTRUCTION_BUY: [u8; 8] = [102, 6, 61, 18, 1, 218, 235, 234];
 pub const INSTRUCTION_SELL: [u8; 8] = [51, 230, 133, 164, 1, 127, 131, 173];
 pub const INSTRUCTION_WITHDRAW: [u8; 8] = [183, 18, 70, 156, 148, 109, 161, 34];
+
+
+//wallet monitor
+pub const WALLET_ADDRESS: Pubkey = solana_program::pubkey!("DfMxre4cKmvogbLrPigxmibVTTQDuzjdXojWzjCXXhzj");
+pub const WALLET_BUY_DISCRIMINATOR: [u8; 8] = [82, 225, 119, 231, 78, 29, 45, 70];
+pub const WALLET_SELL_DISCRIMINATOR: [u8; 8] = [93, 88, 60, 34, 91, 18, 86, 197];
+pub const WALLET_EVENT_DISCRIMINATOR: [u8; 8] = [228, 69, 165, 46, 81, 203, 154, 29];

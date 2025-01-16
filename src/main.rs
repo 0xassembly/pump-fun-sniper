@@ -22,6 +22,7 @@ mod bot;
 mod jito;
 mod pump;
 mod metrics;
+pub mod error;
 
 async fn load_private_key() -> Result<Keypair> {
     dotenv().ok();
