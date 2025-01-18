@@ -214,7 +214,7 @@ impl Bot {
             &instructions,
             Some(&self.private_key.pubkey()),
             &vec![&*self.private_key],
-            blockhash
+            blockhash,
         ))
     }
 
@@ -229,7 +229,7 @@ impl Bot {
             };
             self.rpc_client.send_and_confirm_transaction_with_spinner_and_config(
                 transaction,
-                CommitmentConfig::confirmed(),
+                CommitmentConfig::finalized(),
                 config,
             ).await?.to_string()
         };

@@ -142,8 +142,8 @@ async fn main() -> Result<()> {
         &ws_url,
         &keypair.to_base58_string(),
         db,
-        0.0075,
-        250_000,
+        0.0275,
+        1_000_000,
         proxy_url.is_some(),
         proxy_url.as_deref(),
         &grpc_endpoint,
@@ -168,7 +168,7 @@ async fn main() -> Result<()> {
     tokio::spawn(async move {
         let result = if use_grpc {
             info!("Starting gRPC monitoring...");
-            bot_clone.grpc_monitor_wallet().await
+            bot_clone.grpc_monitor_mints().await
         } else {
             info!("Starting RPC monitoring...");
             bot_clone.rpc_monitor_mints().await

@@ -4,13 +4,16 @@ use {
     std::{sync::Arc, time::Duration},
     tokio::sync::Mutex,
     futures::future::join_all,
-    tokio::time::sleep
+    tokio::time::sleep,
+    log::error,
 };
 
 impl Bot {
     /// Handles selling coins by continuously monitoring pending coins
     /// and initiating sell operations when necessary
     pub async fn handle_sell_coins(&self) {
+        info!("Starting sell coins handler");
+        
         loop {
             // Process pending coins
             let coins_to_sell = self.fetch_coins_to_sell().await;
@@ -21,18 +24,28 @@ impl Bot {
 
             // Process each coin that needs to be sold
             for coin in coins_to_sell {
-                let bot = self.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = bot.sell_coin_fast(coin).await {
-                        info!("Error selling coin: {}", e);
+                match self.sell_coin_fast(coin.clone()).await {
+                    Ok(_) => {
+                        // Remove the sold coin from pending_coins
+                        let mut pending_coins = self.pending_coins.lock().await;
+                        if let Some(mint_addr) = coin.lock().await.mint_address {
+                            pending_coins.remove(&mint_addr.to_string());
+                            info!("Successfully sold and removed coin {}", mint_addr);
+                        }
+                        // Resume monitoring after successful sale
+                        *self.is_monitoring.lock().await = true;
+                        info!("Resumed monitoring after selling coin");
                     }
-                });
+                    Err(e) => {
+                        error!("Error selling coin: {}", e);
+                    }
+                }
             }
 
             // Check if we need to update monitoring state
             self.check_monitoring_state().await;
 
-            // Wait before next check (100ms like in Go version)
+            // Wait before next check
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     }

@@ -67,51 +67,48 @@ fn grpc_fetch_new_coin(transaction: &SubscribeUpdateTransactionInfo) -> Result<C
     let message_clone = &transaction.transaction.as_ref().unwrap().message.as_ref().unwrap().clone();
     info!("Attempting to extract coin details from transaction");
    
+    // Check all instructions starting from index 2
+    for i in 2..message_clone.instructions.len() {
+        if let Some(instruction) = &message_clone.instructions.get(i) {
+            if instruction.data.len() < 8 {
+                error!("Instruction data too short: {}", instruction.data.len());
+                continue;
+            }
+            let type_id = &instruction.data[0..8];
+            //info!("Instruction type ID: {:?}", type_id);
+            //info!("Expected CREATE ID: {:?}", INSTRUCTION_CREATE);
 
-    // Directly access the instruction at index 2 or 3
-    if let Some(instruction) = &message_clone.instructions.get(2) {
-        if instruction.data.len() < 8 {
-            error!("Instruction data too short: {}", instruction.data.len());
-            return Err(Box::new(MonitorError::CreatingNewCoin));
+            // Only process Create instructions
+            if type_id == INSTRUCTION_CREATE {
+                grpc_decode_token_metadata(&instruction.data);
+                
+                let solana_instruction = solana_sdk::instruction::CompiledInstruction {
+                    program_id_index: instruction.program_id_index as u8,
+                    accounts: instruction.accounts.clone(),
+                    data: instruction.data.clone(),
+                };
+
+                let account_keys: &Vec<Pubkey> = &message_clone.account_keys.iter()
+                    .map(|key| Pubkey::from_str(&bs58::encode(key).into_string()))
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                let accounts = CreateAccounts::try_from(CreateInstructionWithAccounts {
+                    instruction: &solana_instruction,
+                    account_keys: account_keys,
+                }).map_err(|e| {
+                    error!("Failed to resolve instruction accounts: {}", e);
+                    e
+                })?;
+                
+                // Create new coin from instruction accounts
+                info!("Creating new coin from instruction accounts");
+                return grpc_new_coin_from_create_inst(&accounts);
+            }
         }
-        let type_id = &instruction.data[0..8];
-        //info!("Instruction type ID: {:?}", type_id);
-        //info!("Expected CREATE ID: {:?}", INSTRUCTION_CREATE);
-
-        // Only process Create instructions
-        if type_id != INSTRUCTION_CREATE {
-            debug!("Not a create instruction");
-            return Err(Box::new(MonitorError::NoCreateInstruction));
-        }
-             
-        grpc_decode_token_metadata(&instruction.data);
-        
-
-        let solana_instruction = solana_sdk::instruction::CompiledInstruction {
-            program_id_index: instruction.program_id_index as u8,
-            accounts: instruction.accounts.clone(),
-            data: instruction.data.clone(),
-        };
-
-        let account_keys: &Vec<Pubkey> = &message_clone.account_keys.iter()
-        .map(|key| Pubkey::from_str(&bs58::encode(key).into_string()))
-        .collect::<Result<Vec<_>, _>>()?;
-
-
-        let accounts = CreateAccounts::try_from(CreateInstructionWithAccounts {
-            instruction: &solana_instruction,
-            account_keys: account_keys,
-        }).map_err(|e| {
-            error!("Failed to resolve instruction accounts: {}", e);
-            e
-        })?;
-        // Create new coin from instruction accounts
-        info!("Creating new coin from instruction accounts");
-        return grpc_new_coin_from_create_inst(&accounts);
     }
 
-    error!("No valid create instruction found in transaction");
-    Err(Box::new(MonitorError::CreatingNewCoin))
+    debug!("No create instruction found in transaction");
+    return Err(Box::new(MonitorError::NoCreateInstruction));
 }
 
 fn grpc_decode_token_metadata(metadata: &Vec<u8>) -> CreateInstructionData {
@@ -215,63 +212,66 @@ fn grpc_decode_event_data(coin: &mut Coin, transaction: &SubscribeUpdateTransact
 }
 
 fn grpc_process_buy_instruction(coin: &mut Coin, message_clone: &yellowstone_grpc_proto::prelude::Message) -> Result<(), Box<dyn Error + Send + Sync>> {
-    if let Some(instruction) = message_clone.instructions.get(4) {
-        info!("Processing instruction at index 4");
-        let type_id = &instruction.data[0..8];
-        if type_id != INSTRUCTION_BUY {
-            debug!("Not a buy instruction");
-            return Err(Box::new(MonitorError::NoBuyInstruction));
+    for i in 2..message_clone.instructions.len() {
+        if let Some(instruction) = message_clone.instructions.get(i) {
+            info!("Processing instruction at index {}", i);
+            
+            // Check instruction data length first
+            if instruction.data.len() < 8 {
+                debug!("Instruction data too short at index {}: {}", i, instruction.data.len());
+                continue;
+            }
+
+            let type_id = &instruction.data[0..8];
+            if type_id != INSTRUCTION_BUY {
+                continue;
+            }
+
+
+            //info!("Instruction type ID: {:?}", type_id);
+            //info!("Expected BUY ID: {:?}", INSTRUCTION_BUY);
+
+            info!("Found buy instruction, attempting to get accounts");
+            //info!("Account keys: {:?}", message_clone.account_keys);
+            //info!("Instruction accounts: {:?}", instruction.accounts);
+
+            let solana_instruction = solana_sdk::instruction::CompiledInstruction {
+                program_id_index: instruction.program_id_index as u8,
+                accounts: instruction.accounts.clone(),
+                data: instruction.data.clone(),
+            };
+
+            let account_keys: &Vec<Pubkey> = &message_clone.account_keys.iter()
+            .map(|key| Pubkey::from_str(&bs58::encode(key).into_string()))
+            .collect::<Result<Vec<_>, _>>()?;
+
+            // Get buy accounts
+            let accounts = BuyAccounts::try_from_instruction(&solana_instruction, account_keys).map_err(|_| {
+                error!("Failed to get buy accounts");
+                MonitorError::BuyAccountsCantDecode
+            })?;
+
+            // Check associated token account
+            if accounts.associated_user.pubkey == Pubkey::default() {
+                error!("Invalid associated token account (default pubkey)");
+                continue;
+            }
+
+            let buy_data = BuyInstructionData::try_from_slice(&solana_instruction.data[8..])
+                .map_err(|_| MonitorError::BuyDataCantDecode)?;
+
+            if buy_data.max_sol_cost == 0 {
+                return Err(Box::new(MonitorError::ZeroBuyAmount));
+            }
+
+            info!("Successfully decoded buy data: {} SOL", buy_data.max_sol_cost as f64 / LAMPORTS_PER_SOL as f64);
+            coin.creator_purchased = true;
+            coin.creator_purchase_sol = 0.99 * buy_data.max_sol_cost as f64 / LAMPORTS_PER_SOL as f64;
+            coin.creator_ata = Some(accounts.associated_user.pubkey);
+            
+            info!("Successfully updated coin with buy information");
+            return Ok(());
         }
-        // Check instruction type and data length
-        if instruction.data.len() < 8 {
-            //debug!("Instruction data too short: {}", instruction.data.len());
-            return Err(Box::new(MonitorError::InstructionDataTooShort));
-        }
-
-        //info!("Instruction type ID: {:?}", type_id);
-        //info!("Expected BUY ID: {:?}", INSTRUCTION_BUY);
-
-        info!("Found buy instruction, attempting to get accounts");
-        //info!("Account keys: {:?}", message_clone.account_keys);
-        //info!("Instruction accounts: {:?}", instruction.accounts);
-
-        let solana_instruction = solana_sdk::instruction::CompiledInstruction {
-            program_id_index: instruction.program_id_index as u8,
-            accounts: instruction.accounts.clone(),
-            data: instruction.data.clone(),
-        };
-
-        let account_keys: &Vec<Pubkey> = &message_clone.account_keys.iter()
-        .map(|key| Pubkey::from_str(&bs58::encode(key).into_string()))
-        .collect::<Result<Vec<_>, _>>()?;
-
-
-        // Get buy accounts
-        let accounts = BuyAccounts::try_from_instruction(&solana_instruction, account_keys).map_err(|_| {
-            error!("Failed to get buy accounts");
-            MonitorError::BuyAccountsCantDecode
-        })?;
-
-        // Check associated token account
-        if accounts.associated_user.pubkey == Pubkey::default() {
-            error!("Invalid associated token account (default pubkey)");
-            return Err(Box::new(MonitorError::NoCreatorATA));
-        }
-
-        let buy_data = BuyInstructionData::try_from_slice(&solana_instruction.data[8..])
-            .map_err(|_| MonitorError::BuyDataCantDecode)?;
-
-        if buy_data.max_sol_cost == 0 {
-            return Err(Box::new(MonitorError::ZeroBuyAmount));
-        }
-
-        info!("Successfully decoded buy data: {} SOL", buy_data.max_sol_cost as f64 / LAMPORTS_PER_SOL as f64);
-        coin.creator_purchased = true;
-        coin.creator_purchase_sol = 0.99 * buy_data.max_sol_cost as f64 / LAMPORTS_PER_SOL as f64;
-        coin.creator_ata = Some(accounts.associated_user.pubkey);
-        
-        info!("Successfully updated coin with buy information");
-        return Ok(());
     }
 
     error!("No valid buy instruction found in transaction");
@@ -287,19 +287,11 @@ fn grpc_fetch_creator_buy(coin: &mut Coin, transaction: &SubscribeUpdateTransact
 
 impl Bot {
     pub async fn grpc_monitor_mints(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        loop {
-            // Check monitoring state before attempting to connect
-            if !*self.is_monitoring.lock().await {
-                info!("GRPC monitoring stopped, exiting monitor loop");
-                return Ok(());
-            }
-
-            let mut grpc_client = match self.grpc_connect_client().await {
+        let mut grpc_client = match self.grpc_connect_client().await {
                 Ok(client) => client,
                 Err(err) => {
                     error!("Error connecting to gRPC client: {}", err);
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-                    continue;
+                return Err(err);
                 }
             };
 
@@ -308,10 +300,17 @@ impl Bot {
                 Ok(sub) => sub,
                 Err(err) => {
                     error!("Error subscribing to gRPC: {}", err);
+                return Err(Box::new(err));
+            }
+        };
+        
+        loop {
+            // Check monitoring state before attempting to connect
+            if !*self.is_monitoring.lock().await {
+                info!("GRPC monitoring paused, waiting...");
                     tokio::time::sleep(Duration::from_secs(1)).await;
                     continue;
                 }
-            };
 
             if let Err(err) = subscribe_tx.send(self.grpc_create_subscription_request()).await {
                 error!("Error sending subscription request: {}", err);
@@ -319,7 +318,7 @@ impl Bot {
             }
 
             self.grpc_process_stream(&mut stream).await;
-
+            
             error!("Stream disconnected, reconnecting...");
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
@@ -370,6 +369,7 @@ impl Bot {
             from_slot: Some(from_slot),
         }
     }
+
 
     async fn grpc_process_stream(&self, stream: &mut (impl Stream<Item = Result<SubscribeUpdate, Status>> + Unpin)) {
         while let Some(message) = stream.next().await {
@@ -473,37 +473,37 @@ impl Bot {
                 
                 let fee_payer = Pubkey::from_str(&bs58::encode(&message_clone.account_keys[0]).into_string())?;
                 info!("Fee Payer: {}", fee_payer);
-                       
-                // Create message first
-                let mut legacy_message = solana_sdk::message::Message::new(
-                    &[],
-                    Some(&fee_payer)
-                );
+                                
+                                // Create message first
+                                let mut legacy_message = solana_sdk::message::Message::new(
+                                    &[],
+                                    Some(&fee_payer)
+                                );
                 
-               
-                // Set account keys
+
+                                // Set account keys
                 legacy_message.account_keys = message_clone.account_keys.iter()
                     .map(|key| Pubkey::from_str(&bs58::encode(key).into_string()))
-                    .collect::<Result<Vec<_>, _>>()?;
+                                    .collect::<Result<Vec<_>, _>>()?;
 
                 //info!("Acount keys: {:?}", legacy_message.account_keys);
 
-                // Set recent blockhash
+                                // Set recent blockhash
                 legacy_message.recent_blockhash = solana_sdk::hash::Hash::from_str(&bs58::encode(&message_clone.recent_blockhash).into_string())?;
                 info!("Recent Blockhash: {:?}", legacy_message.recent_blockhash);
                 *self.blockhash.lock().await = Some(legacy_message.recent_blockhash);
-    
-                // Set instructions
+
+                                // Set instructions
                 legacy_message.instructions = message_clone.instructions.iter()
-                    .map(|ix| {
+                                    .map(|ix| {
                         //info!("Original instruction data: {:?}", ix.data);
-                        solana_sdk::instruction::CompiledInstruction {
+                                        solana_sdk::instruction::CompiledInstruction {
                             program_id_index: ix.program_id_index as u8,
-                            accounts: ix.accounts.clone(),
+                                            accounts: ix.accounts.clone(),
                             data: ix.data.clone(),
-                        }
-                    })
-                    .collect();
+                                        }
+                                    })
+                                    .collect();
 
                 //info!("Reconstructed {:?} instructions", legacy_message.instructions);
 
@@ -519,7 +519,7 @@ impl Bot {
                     }
                 };
                 
-                 
+
                 // Get creator buy information
                 match grpc_fetch_creator_buy(&mut new_coin, &transaction_clone) {
                     Ok(_) => {
@@ -533,14 +533,14 @@ impl Bot {
                 }
 
         }
-
+        
 
 
     /// Determines if a coin should be bought based on various criteria
     async fn grpc_should_buy_coin(&self, coin: &Coin) -> Result<bool, Box<dyn Error + Send + Sync>> {
         info!("Checking if coin should be bought");
         info!("Check The time");
-
+        
         if coin.mint_timestamp < (Utc::now().timestamp()) {
             error!("Mint timestamp is too old");
             return Ok(false);
@@ -552,7 +552,7 @@ impl Bot {
         info!("Creator: {}", creator_pubkey);
         info!("Creator purchase amount: {} SOL", coin.creator_purchase_sol);
         //coin.creator_purchase_sol < 0.2 || coin.creator_purchase_sol > 2.5 
-        if coin.creator_purchase_sol > 0.7 || coin.creator_purchase_sol < 0.1{
+        if coin.creator_purchase_sol > 1.5 || coin.creator_purchase_sol < 0.2{
             info!("Rejecting: Creator purchase amount {} SOL is outside allowed range (0.5-1.0)", coin.creator_purchase_sol);
             return Ok(false);
         }

@@ -43,7 +43,6 @@ use {
 };
 
 impl Bot {
-    // Main handler that processes coins to buy from the channel
     pub async fn handle_buy_coins(&self, should_geyser: bool) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         info!("Starting buy coins handler...");
         while let Some(coin) = self.coins_to_buy.lock().await.recv().await {

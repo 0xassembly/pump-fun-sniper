@@ -10,7 +10,7 @@ use thiserror::Error;
 use std::str::FromStr;
 use log::info;
 
-use crate::bot::constants::TOKEN_PROGRAM_ID;
+use crate::bot::constants::{EVENT_AUTH_ID, GLOBAL_ID, PROGRAM_ID, TOKEN_PROGRAM_ID};
 #[derive(Debug)]
 pub enum SellError {
     InvalidAccountMeta,
@@ -139,7 +139,7 @@ impl SellAccounts {
 
         // Then set the correct permissions as per the Go version
         let accounts = Self {
-            global: AccountMeta::new_readonly(resolved_accounts[8].clone().pubkey, false),                                  // [] global
+            global: AccountMeta::new_readonly(GLOBAL_ID, false),                                  // [] global
             fee_recipient: AccountMeta::new(resolved_accounts[1].pubkey, true),   // [WRITE] feeRecipient
             mint: AccountMeta::new_readonly(resolved_accounts[10].clone().pubkey, false),                                   // [] mint
             bonding_curve: AccountMeta::new(resolved_accounts[2].pubkey, true),   // [WRITE] bondingCurve
@@ -149,8 +149,8 @@ impl SellAccounts {
             system_program: AccountMeta::new_readonly(resolved_accounts[12].clone().pubkey, false), 
             associated_token_program: AccountMeta::new_readonly(resolved_accounts[10].clone().pubkey, false),
             token_program: AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),                         // [] tokenProgram                         // [] rent
-            event_authority: AccountMeta::new_readonly(resolved_accounts[9].clone().pubkey, false),                      // [] eventAuthority
-            program: AccountMeta::new_readonly(resolved_accounts[11].clone().pubkey, false),                              // [] program
+            event_authority: AccountMeta::new_readonly(EVENT_AUTH_ID, false),                      // [] eventAuthority
+            program: AccountMeta::new_readonly(PROGRAM_ID, false),                              // [] program
         };
         Ok(accounts)
     }

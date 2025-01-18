@@ -65,8 +65,27 @@ impl JitoManager {
     }
 
     pub async fn generate_tip_instruction(&self) -> Result<Instruction> {
-        let tip_amount = self.generate_tip_amount();
+        // Fixed tip amount for buys: 0.00256 SOL
+        let tip_amount = 1_000;
         info!("Generating tip instruction for {:.5} SOL", tip_amount as f64 / 1e9);
+        
+        // Get a random tip account
+        let tip_account = Pubkey::from_str(&self.jito_sdk.get_random_tip_account().await?)?;
+        
+        // Create a transfer instruction to the tip account
+        let instruction = solana_sdk::system_instruction::transfer(
+            &self.keypair.pubkey(),
+            &tip_account,
+            tip_amount,
+        );
+        
+        Ok(instruction)
+    }
+
+    pub async fn generate_default_tip_instruction(&self) -> Result<Instruction> {
+        // Default tip amount for sells: 0.00001 SOL
+        let tip_amount = 1_000;
+        info!("Generating default tip instruction for {:.5} SOL", tip_amount as f64 / 1e9);
         
         // Get a random tip account
         let tip_account = Pubkey::from_str(&self.jito_sdk.get_random_tip_account().await?)?;

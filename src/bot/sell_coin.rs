@@ -40,10 +40,10 @@ impl Bot {
         }
 
         let mut retry_count = 0;
-        const MAX_RETRIES: u32 = 5;
-        const TRANSACTION_TIMEOUT: Duration = Duration::from_secs(1); // 8 seconds timeout
+        const MAX_RETRIES: u32 = 10;
+        const TRANSACTION_TIMEOUT: Duration = Duration::from_secs(8); // 8 seconds timeout
         let mut send_vanilla = true;
-        sleep(Duration::from_secs(1)).await; // Wait for 4 seconds before starting
+        sleep(Duration::from_secs(4)).await; // Wait for 4 seconds before starting
         while retry_count < MAX_RETRIES {
             send_vanilla = !send_vanilla;
             
@@ -89,9 +89,11 @@ impl Bot {
         // Create sell instruction
         let sell_instruction = self.create_sell_instruction(&coin_guard)
             .map_err(|e| format!("Failed to create sell instruction: {}", e))?;
-
+        
+        info!("Fee micro lamports: {}", self.fee_micro_lamports);
         // Create compute budget instructions
-        let mut instructions = vec![
+        let mut instructions = 
+        vec![
             ComputeBudgetInstruction::set_compute_unit_price(
                 self.fee_micro_lamports
             ),
@@ -102,12 +104,13 @@ impl Bot {
         ];
 
         // Handle Jito if enabled
-        let enable_jito = self.jito_manager.is_jito_leader() && !send_vanilla;
+        //let enable_jito = self.jito_manager.is_jito_leader() && !send_vanilla;
+        let enable_jito = false;
         info!("Enable Jito Sell: {}", enable_jito);
         if enable_jito {
-            coin_guard.status("Jito leader, setting tip & removing priority fee inst");
-            let tip_inst = self.jito_manager.generate_tip_instruction().await
-                .map_err(|e| format!("Failed to generate Jito tip instruction: {}", e))?;
+            coin_guard.status("Jito leader, setting default tip & removing priority fee inst");
+            let tip_inst = self.jito_manager.generate_default_tip_instruction().await
+                .map_err(|e| format!("Failed to generate Jito default tip instruction: {}", e))?;
             instructions.push(tip_inst);
             // Remove priority fee when using Jito tip
             instructions.remove(0);
@@ -126,13 +129,12 @@ impl Bot {
         } else {
             let config = RpcSendTransactionConfig {
                 skip_preflight: true,
-                max_retries: Some(0),
                 .. RpcSendTransactionConfig::default()
             };
 
             self.rpc_client.send_and_confirm_transaction_with_spinner_and_config(
                 &transaction,
-                CommitmentConfig::confirmed(),
+                CommitmentConfig::finalized(),
                 config,
             ).await
                 .map_err(|e| format!("Failed to send transaction: {}", e))?
@@ -147,10 +149,8 @@ impl Bot {
         // Validate required addresses
         let mint_address = coin.mint_address.ok_or_else(|| Box::<dyn std::error::Error + Send + Sync>::from("Mint address is None"))?;
         let associated_token_account = coin.associated_token_account.ok_or_else(|| Box::<dyn std::error::Error + Send + Sync>::from("Associated token account is None"))?;
-        
         info!("Creating sell instruction for:");
         info!("Mint: {}", mint_address);
-        info!("Token Account: {}", associated_token_account);
         info!("Token Bonding Curve: {}", coin.token_bonding_curve);
         info!("Associated Bonding Curve: {}", coin.associated_bonding_curve);
         info!("Event Authority: {}", coin.event_authority);

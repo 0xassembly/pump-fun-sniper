@@ -291,7 +291,7 @@ impl Bot {
             send_tx_clients,
             private_key,
             db_connection,
-            fee_micro_lamports,
+            fee_micro_lamports: fee_micro_lamports,
             buy_amount_lamports,
             pending_coins: Arc::new(Mutex::new(HashMap::new())),
             coins_to_buy_sender: coins_to_buy_tx,
