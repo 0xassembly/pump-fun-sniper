@@ -17,7 +17,8 @@ use {
             rpc_client::RpcClient
         },
         pubsub_client::PubsubClientSubscription,
-        rpc_config::{RpcTransactionConfig, RpcTransactionLogsConfig, RpcTransactionLogsFilter}
+        rpc_config::{RpcTransactionConfig, RpcTransactionLogsConfig, RpcTransactionLogsFilter},
+        rpc_client::GetConfirmedSignaturesForAddress2Config
     }, 
     solana_program::{
         instruction::Instruction,
@@ -538,6 +539,23 @@ impl Bot {
 
     /// Determines if a coin should be bought based on various criteria
     async fn grpc_should_buy_coin(&self, coin: &Coin) -> Result<bool, Box<dyn Error + Send + Sync>> {
+
+        // Check price constraints
+        let creator_pubkey = coin.creator.to_string();
+
+        info!("Mint timestamp: {}", coin.mint_timestamp);
+        info!("Current timestamp: {}", Utc::now().timestamp());
+        info!("Creator: {}", creator_pubkey);
+        info!("Creator purchase amount: {} SOL", coin.creator_purchase_sol);
+
+
+        let creator_wallet_age = self.check_creator_wallet_age(&coin.creator).await?;
+        info!("Creator wallet age: {}", creator_wallet_age);
+        if !creator_wallet_age {
+            info!("Creator wallet is too new");
+            return Ok(false);
+        }
+
         info!("Checking if coin should be bought");
         info!("Check The time");
         
@@ -545,12 +563,7 @@ impl Bot {
             error!("Mint timestamp is too old");
             return Ok(false);
         }
-        // Check price constraints
-        let creator_pubkey = coin.creator.to_string();
-        info!("Mint timestamp: {}", coin.mint_timestamp);
-        info!("Current timestamp: {}", Utc::now().timestamp());
-        info!("Creator: {}", creator_pubkey);
-        info!("Creator purchase amount: {} SOL", coin.creator_purchase_sol);
+
         //coin.creator_purchase_sol < 0.2 || coin.creator_purchase_sol > 2.5 
         if coin.creator_purchase_sol > 1.5 || coin.creator_purchase_sol < 0.2{
             info!("Rejecting: Creator purchase amount {} SOL is outside allowed range (0.5-1.0)", coin.creator_purchase_sol);
@@ -560,6 +573,49 @@ impl Bot {
         Ok(true)
     }
 
+
+    async fn check_creator_wallet_age(&self, creator: &Pubkey) -> Result<bool, Box<dyn Error + Send + Sync>> {
+        info!("Checking creator wallet age for {}", creator);
+        
+        // Get signatures with config to get oldest transactions
+        let config = GetConfirmedSignaturesForAddress2Config {
+            before: None,
+            until: None,
+            limit: Some(1000), // Get maximum allowed signatures
+            commitment: Some(CommitmentConfig::confirmed()),
+        };
+
+        let signatures = self.rpc_client
+            .get_signatures_for_address_with_config(creator, config)
+            .await?;
+
+        // If no signatures found, wallet is too new
+        if signatures.is_empty() {
+            info!("No transactions found for creator wallet");
+            return Ok(false);
+        }
+
+        // Get the oldest transaction (last in list since they're ordered newest to oldest)
+        if let Some(oldest_tx) = signatures.last() {
+            if let Some(block_time) = oldest_tx.block_time {
+                let current_time = Utc::now().timestamp();
+                let age_in_seconds = current_time.saturating_sub(block_time);
+                
+                info!("Creator wallet age: {} seconds (oldest tx at {})", age_in_seconds, block_time);
+                
+                // Require at least 10 days of age (864000 seconds)
+                const TEN_DAYS: i64 = 864000;
+                if age_in_seconds < TEN_DAYS {
+                    info!("Creator wallet too new ({} seconds old)", age_in_seconds);
+                    return Ok(false);
+                }
+                
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
 
 }
 
